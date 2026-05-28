@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import MockCardCheckoutModal from '../payments/MockCardCheckoutModal';
+import SplitBillModal from '../billing/SplitBillModal';
 
 const PAYMENT_METHODS = [
   { id: 'cash', label: 'Efectivo', icon: Banknote, color: 'emerald' },
@@ -48,6 +49,7 @@ const OrderCart = () => {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('cash');
   const [, setQrPaymentSent] = useState(false);
   const [mockSession, setMockSession] = useState(null);
+  const [showSplitBill, setShowSplitBill] = useState(false);
 
   const handleSendOrder = async () => {
     if (orderMode === 'takeaway' && (!takeawayCustomer.name || !takeawayCustomer.phone)) {
@@ -525,11 +527,11 @@ const OrderCart = () => {
                 <span className="text-lg font-bold text-white">Bs. {tableTotal.toFixed(2)}</span>
               </div>
               <button
-                onClick={() => setShowConfirmPay(true)}
+                onClick={() => setShowSplitBill(true)}
                 className="w-full py-2.5 rounded-xl font-medium text-white flex items-center justify-center gap-2 text-sm bg-emerald-500"
               >
                 <DollarSign size={16} />
-                <span>Cobrar Mesa</span>
+                <span>Cobrar / Dividir</span>
               </button>
             </>
           )}
@@ -555,6 +557,14 @@ const OrderCart = () => {
         onSuccess={() => {
           setMockSession(null);
         }}
+      />
+
+      <SplitBillModal
+        open={showSplitBill && Boolean(selectedTable)}
+        onClose={() => setShowSplitBill(false)}
+        tableId={selectedTable?.id}
+        tableNumber={selectedTable?.number}
+        scope="waiter"
       />
     </>
   );

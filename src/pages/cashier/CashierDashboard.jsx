@@ -7,6 +7,7 @@ import {
 import { clsx } from 'clsx';
 import { useRestaurant } from '../../context/RestaurantContext';
 import MockCardCheckoutModal from '../../components/payments/MockCardCheckoutModal';
+import SplitBillModal from '../../components/billing/SplitBillModal';
 
 const PAYMENT_BUTTON_STYLES = {
   cash: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400',
@@ -27,6 +28,7 @@ const CashierDashboardContent = () => {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [showPayModal, setShowPayModal] = useState(false);
   const [mockSession, setMockSession] = useState(null);
+  const [splitTable, setSplitTable] = useState(null);
 
   const pendingPayments = orders.filter((order) => (order.status === 'ready' || order.status === 'served') && order.status !== 'paid');
   const tablesWithPendingQR = tables.filter((table) => table.pendingPayment);
@@ -39,6 +41,14 @@ const CashierDashboardContent = () => {
   const totalPaidAmount = paidToday.reduce((sum, order) => sum + order.items.reduce((subtotal, item) => subtotal + (item.product.price * item.quantity), 0), 0);
 
   const handleOpenPayModal = (order) => {
+    if (order.orderType !== 'takeaway') {
+      setSplitTable({
+        id: order.tableId,
+        number: order.tableNumber,
+      });
+      return;
+    }
+
     setSelectedOrder(order);
     setPaymentMethod('cash');
     setShowPayModal(true);
@@ -211,7 +221,7 @@ const CashierDashboardContent = () => {
                       </div>
                       <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => handleOpenPayModal(order)} className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-medium flex items-center gap-2">
                         <DollarSign size={16} />
-                        Cobrar
+                        {isTakeaway ? 'Cobrar' : 'Cobrar / Dividir'}
                       </motion.button>
                     </div>
                   </motion.div>
@@ -273,6 +283,14 @@ const CashierDashboardContent = () => {
           setMockSession(null);
           setSelectedOrder(null);
         }}
+      />
+
+      <SplitBillModal
+        open={Boolean(splitTable)}
+        onClose={() => setSplitTable(null)}
+        tableId={splitTable?.id}
+        tableNumber={splitTable?.number}
+        scope="cashier"
       />
 
       <AnimatePresence>

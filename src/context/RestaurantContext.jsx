@@ -15,6 +15,7 @@ const PUBLIC_TABLE_UUID_KEY = 'public_table_uuid';
 const PUBLIC_TABLE_SIGNATURE_KEY = 'public_table_signature';
 const PUBLIC_TABLE_EXPIRES_AT_KEY = 'public_table_expires_at';
 const PUBLIC_TABLE_FINGERPRINT_KEY = 'public_table_fingerprint';
+const RESERVATION_TRACKING_TOKENS_KEY = 'reservation_tracking_tokens';
 
 const statusMap = {
   pendiente: 'pending',
@@ -39,6 +40,7 @@ const parseAmount = (value) => {
 
 const normalizeReservation = (reservation) => ({
   id: reservation.id,
+  code: reservation.codigo_reserva ?? null,
   tableId: reservation.mesa_id,
   tableNumber: reservation.mesa?.numero || null,
   customerName: reservation.nombre_cliente,
@@ -48,6 +50,22 @@ const normalizeReservation = (reservation) => ({
   reservationTime: reservation.hora_reserva,
   time: reservation.hora_reserva,
   status: reservation.estado,
+  source: reservation.origen ?? 'staff',
+  operationalStatus: reservation.operational_status ?? 'scheduled',
+  guaranteeAmount: parseAmount(reservation.garantia_monto),
+  guaranteeStatus: reservation.garantia_estado ?? 'not_required',
+  guaranteeReference: reservation.garantia_referencia ?? null,
+  guaranteeProofUrl: reservation.garantia_comprobante_url ?? null,
+  guaranteeUploadedAt: reservation.garantia_subida_at ?? null,
+  guaranteeReviewedAt: reservation.garantia_revisada_at ?? null,
+  guaranteeReviewNotes: reservation.garantia_revision_notas ?? null,
+  guaranteeReviewedBy: reservation.garantia_revisada_por ?? null,
+  trackingToken: reservation.tracking_token ?? null,
+  arrivedAt: reservation.arrived_at ?? null,
+  seatedAt: reservation.seated_at ?? null,
+  noShowAt: reservation.no_show_at ?? null,
+  cancelledAt: reservation.cancelled_at ?? null,
+  completedAt: reservation.completed_at ?? null,
 });
 
 const normalizeProduct = (product) => ({
@@ -111,7 +129,15 @@ const normalizeTable = (table) => {
     callRequest: table.llamada_tipo
       ? {
           type: table.llamada_tipo,
+          status: table.llamada_estado || 'pending',
           timestamp: table.llamada_timestamp ? new Date(table.llamada_timestamp) : null,
+          attendedAt: table.llamada_atendida_timestamp ? new Date(table.llamada_atendida_timestamp) : null,
+          attendedBy: table.call_attended_by
+            ? {
+                id: table.call_attended_by.id,
+                name: table.call_attended_by.nombre,
+              }
+            : null,
         }
       : null,
     publicUrl: table.public_url ?? null,
@@ -120,6 +146,16 @@ const normalizeTable = (table) => {
     pendingPayment: normalizePendingPayment(table),
     pendingPaymentId: table.pending_payment_id ?? table.payment_transactions?.[0]?.id ?? null,
     reservation: activeReservation ? normalizeReservation(activeReservation) : null,
+    session: table.session
+      ? {
+          id: table.session.id,
+          status: table.session.status,
+          startedAt: table.session.started_at,
+          expiresAt: table.session.expires_at,
+          lastSeenAt: table.session.last_seen_at,
+        }
+      : null,
+    sessionOrders: (table.session_orders || []).map(normalizeOrder),
   };
 };
 
@@ -137,7 +173,9 @@ const normalizeOrder = (order) => {
   return {
     id: order.id,
     tableId: order.mesa_id,
+    tableSessionId: order.table_session_id ?? null,
     tableNumber: order.mesa?.numero || null,
+    orderSource: order.order_source ?? (order.tipo_pedido === 'llevar' ? 'takeaway' : 'staff'),
     orderType: order.tipo_pedido === 'mesa' ? 'dine-in' : 'takeaway',
     customerName: order.nombre_cliente,
     customerPhone: order.telefono_cliente,
@@ -148,6 +186,78 @@ const normalizeOrder = (order) => {
     readyAt: order.estado === 'listo' ? order.updated_at : null,
     paidAt: order.fecha_pago,
     paymentMethod: order.metodo_pago,
+  };
+};
+
+const normalizeSplitBill = (payload) => {
+  if (!payload?.bill) {
+    return null;
+  }
+
+  return {
+    bill: {
+      id: payload.bill.id,
+      tableId: payload.bill.mesa_id,
+      status: payload.bill.status,
+      totalAmount: parseAmount(payload.bill.total_amount),
+      paidAmount: parseAmount(payload.bill.paid_amount),
+      outstandingAmount: parseAmount(payload.bill.outstanding_amount),
+      openedAt: payload.bill.opened_at,
+      closedAt: payload.bill.closed_at,
+      canReset: Boolean(payload.bill.can_reset),
+    },
+    accounts: (payload.accounts || []).map((account) => ({
+      id: account.id,
+      tableSessionId: account.table_session_id ?? null,
+      displayName: account.display_name,
+      ownerType: account.owner_type,
+      status: account.status,
+      subtotalAmount: parseAmount(account.subtotal_amount),
+      paidAmount: parseAmount(account.paid_amount),
+      outstandingAmount: parseAmount(account.outstanding_amount),
+      sortOrder: account.sort_order ?? 0,
+      items: (account.items || []).map((item) => ({
+        allocationId: item.allocation_id,
+        detailId: item.detail_id,
+        productName: item.product_name,
+        quantity: item.quantity,
+        allocatedAmount: parseAmount(item.allocated_amount),
+        allocationType: item.allocation_type,
+      })),
+    })),
+    lineItems: (payload.line_items || []).map((item) => ({
+      allocationId: item.allocation_id,
+      detailId: item.detail_id,
+      orderId: item.order_id,
+      billAccountId: item.bill_account_id,
+      accountDisplayName: item.account_display_name,
+      accountStatus: item.account_status,
+      sourceLabel: item.source_label,
+      productName: item.product_name,
+      quantity: item.quantity,
+      detailSubtotal: parseAmount(item.detail_subtotal),
+      allocatedAmount: parseAmount(item.allocated_amount),
+      allocationType: item.allocation_type,
+      canEdit: Boolean(item.can_edit),
+    })),
+    groups: (payload.groups || []).map((group) => ({
+      label: group.label,
+      items: (group.items || []).map((item) => ({
+        allocationId: item.allocation_id,
+        detailId: item.detail_id,
+        orderId: item.order_id,
+        billAccountId: item.bill_account_id,
+        accountDisplayName: item.account_display_name,
+        accountStatus: item.account_status,
+        sourceLabel: item.source_label,
+        productName: item.product_name,
+        quantity: item.quantity,
+        detailSubtotal: parseAmount(item.detail_subtotal),
+        allocatedAmount: parseAmount(item.allocated_amount),
+        allocationType: item.allocation_type,
+        canEdit: Boolean(item.can_edit),
+      })),
+    })),
   };
 };
 
@@ -204,16 +314,37 @@ export const RestaurantProvider = ({ children }) => {
   const [orderMode, setOrderMode] = useState('dine-in');
   const [takeawayCustomer, setTakeawayCustomer] = useState({ name: '', phone: '' });
   const lastEventIdRef = useRef(null);
+  const refreshInFlightRef = useRef(null);
+  const refreshTimerRef = useRef(null);
 
-  const refreshProtectedData = useCallback(async () => {
+  const applyTableUpdate = useCallback((updatedTable) => {
+    if (!updatedTable) {
+      return;
+    }
+
+    setTables((previous) =>
+      previous.map((table) => (table.id === updatedTable.id ? updatedTable : table)),
+    );
+    setSelectedTable((current) => (current?.id === updatedTable.id ? updatedTable : current));
+  }, []);
+
+  const refreshProtectedData = useCallback(async (options = {}) => {
+    const { silent = false } = options;
+
     if (!user || isClientRole) {
       setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
+    if (refreshInFlightRef.current) {
+      return refreshInFlightRef.current;
+    }
 
-    try {
+    if (!silent) {
+      setIsLoading(true);
+    }
+
+    const refreshPromise = (async () => {
       const [
         tablesResult,
         productsResult,
@@ -275,12 +406,39 @@ export const RestaurantProvider = ({ children }) => {
       } else {
         console.error('Error fetching active reservations:', reservationsResult.reason);
       }
-    } catch (error) {
+    })().catch((error) => {
       console.error('Error fetching protected restaurant data:', error);
-    } finally {
-      setIsLoading(false);
-    }
+    }).finally(() => {
+      refreshInFlightRef.current = null;
+      if (!silent) {
+        setIsLoading(false);
+      }
+    });
+
+    refreshInFlightRef.current = refreshPromise;
+    return refreshPromise;
   }, [user, isClientRole]);
+
+  const scheduleProtectedRefresh = useCallback((delay = 250) => {
+    if (!user || isClientRole) {
+      return;
+    }
+
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      refreshProtectedData({ silent: true });
+    }, delay);
+  }, [user, isClientRole, refreshProtectedData]);
+
+  useEffect(() => () => {
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+  }, []);
 
   const refreshWaitingTime = useCallback(async () => {
     if (!user || isClientRole) {
@@ -312,7 +470,7 @@ export const RestaurantProvider = ({ children }) => {
       return;
     }
 
-    refreshProtectedData();
+    refreshProtectedData({ silent: false });
     refreshWaitingTime();
   }, [user, isClientRole, refreshProtectedData, refreshWaitingTime]);
 
@@ -321,7 +479,7 @@ export const RestaurantProvider = ({ children }) => {
       return undefined;
     }
 
-    const interval = setInterval(refreshProtectedData, 15000);
+    const interval = setInterval(() => refreshProtectedData({ silent: true }), 30000);
     return () => clearInterval(interval);
   }, [user, isClientRole, refreshProtectedData]);
 
@@ -500,7 +658,7 @@ export const RestaurantProvider = ({ children }) => {
               }
 
               if (event.type !== 'heartbeat') {
-                refreshProtectedData();
+                scheduleProtectedRefresh();
                 refreshWaitingTime();
                 showBrowserNotification(event);
               }
@@ -525,7 +683,7 @@ export const RestaurantProvider = ({ children }) => {
       abortController.abort();
       clearTimeout(reconnectTimeout);
     };
-  }, [user, isClientRole, refreshProtectedData, refreshWaitingTime]);
+  }, [user, isClientRole, refreshProtectedData, refreshWaitingTime, scheduleProtectedRefresh]);
 
   useEffect(() => {
     if (!('Notification' in window) || Notification.permission !== 'default') {
@@ -548,11 +706,11 @@ export const RestaurantProvider = ({ children }) => {
     );
 
     try {
-      await api.put(`/tables/${tableId}`, { estado: backendStatus });
-      await refreshProtectedData();
+      const response = await api.put(`/tables/${tableId}`, { estado: backendStatus });
+      applyTableUpdate(normalizeTable(response.data));
     } catch (error) {
       console.error('Error updating table status:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
   };
 
@@ -570,27 +728,21 @@ export const RestaurantProvider = ({ children }) => {
 
   const selectTable = async (table, waiter = null) => {
     setOrderMode('dine-in');
+    setSelectedTable(table);
+    setCart([]);
 
     try {
       if (waiter && (!table.assignedWaiter || table.assignedWaiter.id === waiter.id)) {
         const response = await api.post(`/tables/${table.id}/assign-waiter`, {
           mesero_asignado_id: waiter.id,
         });
-        const updatedTable = normalizeTable(response.data);
-        setTables((previous) =>
-          previous.map((current) => (current.id === updatedTable.id ? updatedTable : current)),
-        );
-        setSelectedTable(updatedTable);
-      } else {
-        setSelectedTable(table);
+        applyTableUpdate(normalizeTable(response.data));
       }
     } catch (error) {
       console.error('Error selecting table:', error);
       setSelectedTable(table);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
-
-    setCart([]);
   };
 
   const getMyTables = (waiterId) => tables.filter((table) => table.assignedWaiter?.id === waiterId);
@@ -762,7 +914,7 @@ export const RestaurantProvider = ({ children }) => {
       if (orderMode === 'takeaway') {
         setTakeawayCustomer({ name: '', phone: '' });
       }
-      await refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return true;
     } catch (error) {
       console.error('Failed to create order:', error);
@@ -780,10 +932,10 @@ export const RestaurantProvider = ({ children }) => {
         estado: mapToBackendStatus(status),
         reason,
       });
-      await refreshProtectedData();
+      refreshProtectedData({ silent: true });
     } catch (error) {
       console.error('Error updating order status:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
   };
 
@@ -793,26 +945,91 @@ export const RestaurantProvider = ({ children }) => {
         estado: 'pagado',
         metodo_pago: paymentMethod,
       });
-      await refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return true;
     } catch (error) {
       console.error('Error paying takeaway order:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return false;
     }
   };
 
+  const getSplitBill = useCallback(async (tableId) => {
+    try {
+      const response = await api.get(`/tables/${tableId}/split-bill`);
+      return normalizeSplitBill(response.data?.data);
+    } catch (error) {
+      console.error('Error fetching split bill:', error);
+      return null;
+    }
+  }, []);
+
+  const initializeSplitBill = useCallback(async (tableId, options = {}) => {
+    const response = await api.post(`/tables/${tableId}/split-bill/initialize`, {
+      strategy: options.strategy || 'by_session',
+      reset: options.reset ?? false,
+    });
+
+    refreshProtectedData({ silent: true });
+
+    return normalizeSplitBill(response.data?.data);
+  }, [refreshProtectedData]);
+
+  const createSplitBillAccount = useCallback(async (tableId, displayName) => {
+    const response = await api.post(`/tables/${tableId}/split-bill/accounts`, {
+      display_name: displayName,
+    });
+
+    refreshProtectedData({ silent: true });
+
+    return normalizeSplitBill(response.data?.data);
+  }, [refreshProtectedData]);
+
+  const updateSplitBillAccount = useCallback(async (tableId, accountId, payload) => {
+    const response = await api.patch(`/tables/${tableId}/split-bill/accounts/${accountId}`, payload);
+
+    refreshProtectedData({ silent: true });
+
+    return normalizeSplitBill(response.data?.data);
+  }, [refreshProtectedData]);
+
+  const mutateSplitBillAllocations = useCallback(async (tableId, payload) => {
+    const response = await api.post(`/tables/${tableId}/split-bill/allocations`, payload);
+
+    refreshProtectedData({ silent: true });
+
+    return normalizeSplitBill(response.data?.data);
+  }, [refreshProtectedData]);
+
+  const createPaymentIntent = async ({ tableId = null, billAccountId = null, method = 'cash' }) => {
+    const response = await api.post('/payments/intents', {
+      mesa_id: tableId,
+      bill_account_id: billAccountId,
+      method,
+    });
+
+    refreshProtectedData({ silent: true });
+
+    return response.data;
+  };
+
+  const confirmPaymentTransaction = async (paymentId) => {
+    const response = await api.post(`/payments/${paymentId}/confirm`);
+
+    refreshProtectedData({ silent: true });
+
+    return response.data;
+  };
+
   const initiateQRPayment = async (tableId) => {
     try {
-      const response = await api.post('/payments/intents', {
-        mesa_id: tableId,
+      return createPaymentIntent({
+        tableId,
         method: 'qr',
       });
-      await refreshProtectedData();
-      return response.data;
     } catch (error) {
       console.error('Error initiating QR payment:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return null;
     }
   };
@@ -827,17 +1044,16 @@ export const RestaurantProvider = ({ children }) => {
     }
 
     try {
-      const intentResponse = await api.post('/payments/intents', {
-        mesa_id: tableId,
+      const intentResponse = await createPaymentIntent({
+        tableId,
         method: paymentMethod,
       });
 
-      await api.post(`/payments/${intentResponse.data.id}/confirm`);
-      await refreshProtectedData();
+      await confirmPaymentTransaction(intentResponse.id);
       return true;
     } catch (error) {
       console.error('Error paying table:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return false;
     }
   };
@@ -853,36 +1069,43 @@ export const RestaurantProvider = ({ children }) => {
     const response = await api.post(`${prefix}/payments/mock-checkout/submit`, payload);
 
     if (scope === 'protected') {
-      await refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
 
     return response.data;
   };
 
   const startTableCardCheckout = async (tableId) => {
-    const intentResponse = await api.post('/payments/intents', {
-      mesa_id: tableId,
+    const intentResponse = await createPaymentIntent({
+      tableId,
       method: 'card',
     });
 
-    await refreshProtectedData();
+    return createMockCheckoutSession(intentResponse.id);
+  };
 
-    return createMockCheckoutSession(intentResponse.data.id);
+  const startBillAccountCardCheckout = async (billAccountId) => {
+    const intentResponse = await createPaymentIntent({
+      billAccountId,
+      method: 'card',
+    });
+
+    return createMockCheckoutSession(intentResponse.id);
   };
 
   const startPublicCardCheckout = async (paymentId) => createMockCheckoutSession(paymentId, 'public');
 
   const freeTable = async (tableId) => {
     try {
-      await api.post(`/tables/${tableId}/free`);
+      const response = await api.post(`/tables/${tableId}/free`);
+      applyTableUpdate(normalizeTable(response.data));
       if (selectedTable?.id === tableId) {
         setSelectedTable(null);
         setCart([]);
       }
-      await refreshProtectedData();
     } catch (error) {
       console.error('Error freeing table:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
   };
 
@@ -921,10 +1144,10 @@ export const RestaurantProvider = ({ children }) => {
 
     try {
       await api.post(`/tables/${tableId}/occupy`);
-      await refreshProtectedData();
+      refreshProtectedData({ silent: true });
     } catch (error) {
       console.error('Error occupying table:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
   };
 
@@ -932,31 +1155,51 @@ export const RestaurantProvider = ({ children }) => {
     setTables((previous) =>
       previous.map((table) =>
         table.id === tableId
-          ? { ...table, callRequest: { type, timestamp: new Date() } }
+          ? {
+              ...table,
+              callRequest: {
+                type,
+                status: 'pending',
+                timestamp: new Date(),
+                attendedAt: null,
+                attendedBy: null,
+              },
+            }
           : table,
       ),
     );
 
     try {
-      await api.put(`/tables/${tableId}`, { llamada_tipo: type });
-      await refreshProtectedData();
+      const response = await api.put(`/tables/${tableId}`, { llamada_tipo: type });
+      applyTableUpdate(normalizeTable(response.data));
     } catch (error) {
       console.error('Error requesting waiter:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
   };
 
-  const dismissCall = async (tableId) => {
-    setTables((previous) =>
-      previous.map((table) => (table.id === tableId ? { ...table, callRequest: null } : table)),
-    );
+  const acknowledgeCall = async (tableId) => {
+    const response = await api.post(`/tables/${tableId}/calls/acknowledge`);
+    const updatedTable = normalizeTable(response.data);
 
+    applyTableUpdate(updatedTable);
+    return updatedTable;
+  };
+
+  const resolveCall = async (tableId) => {
+    const response = await api.post(`/tables/${tableId}/calls/resolve`);
+    const updatedTable = normalizeTable(response.data);
+
+    applyTableUpdate(updatedTable);
+    return updatedTable;
+  };
+
+  const dismissCall = async (tableId) => {
     try {
-      await api.put(`/tables/${tableId}`, { llamada_tipo: null });
-      await refreshProtectedData();
+      await resolveCall(tableId);
     } catch (error) {
       console.error('Error dismissing table call:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
     }
   };
 
@@ -984,11 +1227,11 @@ export const RestaurantProvider = ({ children }) => {
 
     try {
       await api.post(`/payments/${payment.id}/mark-client-paid`);
-      await refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return true;
     } catch (error) {
       console.error('Error marking payment as client paid:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return false;
     }
   };
@@ -1002,11 +1245,11 @@ export const RestaurantProvider = ({ children }) => {
 
     try {
       await api.post(`/payments/${payment.id}/confirm`);
-      await refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return true;
     } catch (error) {
       console.error('Error confirming payment:', error);
-      refreshProtectedData();
+      refreshProtectedData({ silent: true });
       return false;
     }
   };
@@ -1053,6 +1296,27 @@ export const RestaurantProvider = ({ children }) => {
 
     return { tableUuid, signature, token, expiresAt };
   }, [clearPublicTableSession]);
+
+  const getStoredReservationTrackingTokens = useCallback(() => {
+    try {
+      const rawTokens = localStorage.getItem(RESERVATION_TRACKING_TOKENS_KEY);
+      const parsed = rawTokens ? JSON.parse(rawTokens) : [];
+      return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch (error) {
+      console.error('Error reading reservation tracking tokens:', error);
+      return [];
+    }
+  }, []);
+
+  const storeReservationTrackingToken = useCallback((trackingToken) => {
+    if (!trackingToken) {
+      return;
+    }
+
+    const tokens = getStoredReservationTrackingTokens();
+    const uniqueTokens = [trackingToken, ...tokens.filter((token) => token !== trackingToken)].slice(0, 50);
+    localStorage.setItem(RESERVATION_TRACKING_TOKENS_KEY, JSON.stringify(uniqueTokens));
+  }, [getStoredReservationTrackingTokens]);
 
   const getPublicTableByUuid = useCallback(async (tableUuid, signature = null) => {
     try {
@@ -1122,9 +1386,23 @@ export const RestaurantProvider = ({ children }) => {
   }, []);
 
   const createPublicReservation = useCallback(async (reservationData) => {
-    const response = await api.post('/public/reservations', reservationData);
-    return response.data;
-  }, []);
+    const formData = new FormData();
+
+    Object.entries(reservationData).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') {
+        return;
+      }
+
+      formData.append(key, value);
+    });
+
+    const response = await api.post('/public/reservations', formData);
+    const normalizedReservation = normalizeReservation(response.data);
+
+    storeReservationTrackingToken(normalizedReservation.trackingToken);
+
+    return normalizedReservation;
+  }, [storeReservationTrackingToken]);
 
   const checkReservationAvailability = useCallback(async (fecha, hora, personas) => {
     try {
@@ -1137,6 +1415,86 @@ export const RestaurantProvider = ({ children }) => {
       return { disponible: false, mesas: [] };
     }
   }, []);
+
+  const getPublicReservationHistory = useCallback(async (tokens = null) => {
+    const trackingTokens = tokens ?? getStoredReservationTrackingTokens();
+
+    if (!trackingTokens.length) {
+      return { items: [], total: 0 };
+    }
+
+    const response = await api.post('/public/reservations/history', {
+      tokens: trackingTokens,
+    });
+
+    return {
+      items: (response.data.items || []).map(normalizeReservation),
+      total: response.data.total || 0,
+    };
+  }, [getStoredReservationTrackingTokens]);
+
+  const replacePublicReservationProof = useCallback(async (trackingToken, payload) => {
+    const formData = new FormData();
+
+    if (payload?.garantiaReferencia) {
+      formData.append('garantia_referencia', payload.garantiaReferencia);
+    }
+
+    if (payload?.proofFile) {
+      formData.append('comprobante_garantia', payload.proofFile);
+    }
+
+    const response = await api.post(`/public/reservations/${trackingToken}/proof`, formData);
+    const normalizedReservation = normalizeReservation(response.data);
+
+    storeReservationTrackingToken(normalizedReservation.trackingToken || trackingToken);
+
+    return normalizedReservation;
+  }, [storeReservationTrackingToken]);
+
+  const getReservationAgenda = useCallback(async (date) => {
+    const response = await api.get('/reservations/agenda', {
+      params: date ? { date } : undefined,
+    });
+
+    return {
+      date: response.data.date,
+      items: (response.data.items || []).map(normalizeReservation),
+      summary: response.data.summary || {},
+    };
+  }, []);
+
+  const getReservationReviewQueue = useCallback(async (date) => {
+    const response = await api.get('/reservations/review-queue', {
+      params: date ? { date } : undefined,
+    });
+
+    return {
+      items: (response.data.items || []).map(normalizeReservation),
+      total: response.data.total || 0,
+    };
+  }, []);
+
+  const reviewReservation = useCallback(async (reservationId, action, notes = '') => {
+    const response = await api.post(`/reservations/${reservationId}/review`, {
+      action,
+      notes,
+    });
+
+    refreshProtectedData({ silent: true });
+
+    return normalizeReservation(response.data);
+  }, [refreshProtectedData]);
+
+  const updateReservationOperationalStatus = useCallback(async (reservationId, status) => {
+    const response = await api.post(`/reservations/${reservationId}/operational-status`, {
+      status,
+    });
+
+    refreshProtectedData({ silent: true });
+
+    return normalizeReservation(response.data);
+  }, [refreshProtectedData]);
 
   const createPublicOrder = useCallback(async (tableUuid, orderData) => {
     const response = await api.post(`/public/tables/${tableUuid}/orders`, orderData);
@@ -1272,6 +1630,8 @@ export const RestaurantProvider = ({ children }) => {
     getTableByNumber,
     occupyTableByClient,
     requestWaiter,
+    acknowledgeCall,
+    resolveCall,
     dismissCall,
     getWaitingTime,
     getActiveCallsCount,
@@ -1279,6 +1639,7 @@ export const RestaurantProvider = ({ children }) => {
     markPaymentAsClientPaid,
     confirmPayment,
     startTableCardCheckout,
+    startBillAccountCardCheckout,
     startPublicCardCheckout,
     submitMockCheckout,
     getMyTables,
@@ -1294,9 +1655,22 @@ export const RestaurantProvider = ({ children }) => {
     getPublicMenu,
     createPublicReservation,
     checkReservationAvailability,
+    getPublicReservationHistory,
+    replacePublicReservationProof,
     createPublicOrder,
     callPublic,
     paymentPublic,
+    getReservationAgenda,
+    getReservationReviewQueue,
+    reviewReservation,
+    updateReservationOperationalStatus,
+    getSplitBill,
+    initializeSplitBill,
+    createSplitBillAccount,
+    updateSplitBillAccount,
+    mutateSplitBillAllocations,
+    createPaymentIntent,
+    confirmPaymentTransaction,
     getSettings,
     updateSettings,
     refreshProtectedData,

@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ArrowLeft, UtensilsCrossed, Plus, Search, Edit2, Trash2, 
-  ToggleLeft, ToggleRight, X, Save, DollarSign, Loader2
+  ToggleLeft, ToggleRight, X, Save, DollarSign, Loader2, Image
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import api from '../../services/api';
@@ -26,6 +26,9 @@ const AdminMenu = () => {
     ingredientes: [] // [{ id, cantidad }]
   });
   const [formLoading, setFormLoading] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const fileInputRef = useRef(null);
 
   const fetchData = async () => {
       try {
@@ -72,6 +75,8 @@ const AdminMenu = () => {
             cantidad: i.pivot?.cantidad_necesaria || 0 
           })) || [] 
       });
+      setImageFile(null);
+      setImagePreview(item.imagen_url || null);
     } else {
       setEditingItem(null);
       const defaultCat = categories.length > 0 ? categories[0].id : '';
@@ -80,6 +85,8 @@ const AdminMenu = () => {
         descripcion: '', disponible: true, imagen_url: '',
         ingredientes: []
       });
+      setImageFile(null);
+      setImagePreview(null);
     }
     setShowModal(true);
   };
@@ -92,17 +99,53 @@ const AdminMenu = () => {
     
     setFormLoading(true);
     try {
-        const payload = { ...formData, precio: parseFloat(formData.precio) };
+        let res;
+        const hasImage = imageFile !== null;
+        
+        if (hasImage) {
+            const fd = new FormData();
+            fd.append('nombre', formData.nombre);
+            fd.append('precio', parseFloat(formData.precio));
+            fd.append('categoria_id', formData.categoria_id);
+            fd.append('descripcion', formData.descripcion || '');
+            fd.append('disponible', formData.disponible ? '1' : '0');
+            fd.append('imagen', imageFile);
+            
+            formData.ingredientes.forEach((ing, idx) => {
+                fd.append(`ingredientes[${idx}][id]`, ing.id);
+                fd.append(`ingredientes[${idx}][cantidad]`, ing.cantidad);
+            });
+            
+            if (editingItem) {
+                fd.append('_method', 'PUT');
+                res = await api.post(`/products/${editingItem.id}`, fd);
+            } else {
+                res = await api.post('/products', fd);
+            }
+        } else {
+            const payload = { ...formData, precio: parseFloat(formData.precio) };
+            if (editingItem) {
+                res = await api.put(`/products/${editingItem.id}`, payload);
+            } else {
+                res = await api.post('/products', payload);
+            }
+        }
+        
         if (editingItem) {
-            const res = await api.put(`/products/${editingItem.id}`, payload);
             setProducts(prev => prev.map(p => p.id === editingItem.id ? res.data : p));
             toast.success("Producto actualizado");
         } else {
-            const res = await api.post('/products', payload);
             setProducts(prev => [...prev, res.data]);
             toast.success("Producto creado");
         }
+        
+        const previewToRevoke = imagePreview;
         setShowModal(false);
+        setImageFile(null);
+        setImagePreview(null);
+        if (previewToRevoke && previewToRevoke.startsWith('blob:')) {
+            URL.revokeObjectURL(previewToRevoke);
+        }
     } catch (error) {
         console.error("Error save:", error);
         toast.error("Error al guardar producto");
@@ -376,14 +419,68 @@ const AdminMenu = () => {
                   </div>
                 </div>
                 <div>
-                  <label className="text-sm text-gray-400">URL de Imagen (opcional)</label>
-                  <input
-                    type="text"
-                    value={formData.imagen_url}
-                    onChange={(e) => setFormData(prev => ({ ...prev, imagen_url: e.target.value }))}
-                    placeholder="https://..."
-                    className="w-full mt-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-600 focus:outline-none focus:border-amber-500/50"
-                  />
+                  <label className="text-sm text-gray-400">Imagen del Producto</label>
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-amber-500', 'bg-amber-500/10'); }}
+                    onDragLeave={(e) => { e.currentTarget.classList.remove('border-amber-500', 'bg-amber-500/10'); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.classList.remove('border-amber-500', 'bg-amber-500/10');
+                      const file = e.dataTransfer.files[0];
+                      if (file && file.type.startsWith('image/')) {
+                        setImageFile(file);
+                        setImagePreview(URL.createObjectURL(file));
+                      } else {
+                        toast.error("Por favor, selecciona una imagen válida");
+                      }
+                    }}
+                    className="mt-2 w-full h-40 rounded-xl border-2 border-dashed border-white/20 bg-white/5 flex flex-col items-center justify-center cursor-pointer hover:border-amber-500/50 hover:bg-amber-500/5 transition-all relative overflow-hidden"
+                  >
+                    {imagePreview ? (
+                      <>
+                        <img 
+                          src={imagePreview} 
+                          alt="Preview" 
+                          className="absolute inset-0 w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                          <span className="text-white text-sm font-medium">Cambiar imagen</span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setImageFile(null);
+                            setImagePreview(null);
+                          }}
+                          className="absolute top-2 right-2 p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-500 z-10"
+                        >
+                          <X size={14} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Image size={32} className="text-gray-500 mb-2" />
+                        <p className="text-sm text-gray-400 text-center px-4">
+                          Arrastra una imagen o haz clic para seleccionar
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">JPG, PNG, GIF, WEBP • Máx 2MB</p>
+                      </>
+                    )}
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      hidden 
+                      ref={fileInputRef}
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          setImageFile(file);
+                          setImagePreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
                 <div>
                     <label className="text-sm text-gray-400">Descripción (opcional)</label>

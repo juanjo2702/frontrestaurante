@@ -8,7 +8,7 @@ export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(localStorage.getItem('token')));
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -25,8 +25,6 @@ export const AuthProvider = ({ children }) => {
           localStorage.removeItem('token');
         })
         .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
     }
   }, []);
 
@@ -41,21 +39,40 @@ export const AuthProvider = ({ children }) => {
           name: user.nombre,
           role: user.rol?.nombre
       });
-      return true;
+      return { success: true };
     } catch (error) {
       console.error('Login error:', error);
-      return false;
+      const status = error?.response?.status;
+
+      if (status === 401) {
+        return {
+          success: false,
+          message: 'Credenciales incorrectas. Verifique su email y contraseña.',
+        };
+      }
+
+      if (status === 403) {
+        return {
+          success: false,
+          message: error?.response?.data?.message || 'Tu cuenta no tiene acceso en este momento.',
+        };
+      }
+
+      return {
+        success: false,
+        message: 'No pudimos conectar con el servidor. Intenta nuevamente en unos segundos.',
+      };
     }
   };
 
   const logout = async () => {
+    setUser(null);
+    localStorage.removeItem('token');
+
     try {
         await api.post('/auth/logout');
     } catch (error) {
         console.error('Logout error', error);
-    } finally {
-        setUser(null);
-        localStorage.removeItem('token');
     }
   };
 

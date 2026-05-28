@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -42,6 +42,39 @@ const PAYMENT_OPTIONS = [
     icon: CreditCard,
   },
 ];
+
+const ORDER_STATUS_META = {
+  pending: {
+    label: 'Pendiente',
+    badgeClassName: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+    description: 'Recibimos tu pedido y lo enviaremos a cocina.',
+  },
+  preparing: {
+    label: 'Preparando',
+    badgeClassName: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',
+    description: 'Cocina ya esta preparando tu pedido.',
+  },
+  ready: {
+    label: 'Listo',
+    badgeClassName: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+    description: 'Tu pedido esta listo para servir.',
+  },
+  served: {
+    label: 'Servido',
+    badgeClassName: 'bg-violet-500/15 text-violet-300 border border-violet-500/30',
+    description: 'Tu pedido ya fue entregado en mesa.',
+  },
+  paid: {
+    label: 'Pagado',
+    badgeClassName: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+    description: 'Este pedido ya fue pagado.',
+  },
+  cancelled: {
+    label: 'Cancelado',
+    badgeClassName: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+    description: 'Este pedido fue cancelado.',
+  },
+};
 
 const ClientTableView = () => {
   const { tableUuid } = useParams();
@@ -88,7 +121,14 @@ const ClientTableView = () => {
 
         const storedSession = getStoredPublicSession();
         const hasStoredSession = storedSession?.tableUuid === tableUuid;
-        const mesa = await getPublicTableByUuid(tableUuid, hasStoredSession ? null : signature);
+        let mesa = await getPublicTableByUuid(tableUuid, hasStoredSession ? null : signature);
+
+        // If the stored session token is stale, fall back to the QR signature
+        // so the guest can re-activate the same table from this device.
+        if (!mesa && hasStoredSession && signature) {
+          mesa = await getPublicTableByUuid(tableUuid, signature);
+        }
+
         const publicMenu = await getPublicMenu();
 
         if (!mesa) {
@@ -112,6 +152,7 @@ const ClientTableView = () => {
   }, [tableUuid, signature, getPublicMenu, getPublicTableByUuid, getStoredPublicSession]);
 
   const hasPendingPayment = Boolean(table?.pendingPayment?.amount);
+  const sessionOrders = useMemo(() => table?.sessionOrders || [], [table]);
   const cartTotal = useMemo(
     () => cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0),
     [cart],
@@ -145,7 +186,7 @@ const ClientTableView = () => {
     });
   };
 
-  const refreshPublicTable = async () => {
+  const refreshPublicTable = useCallback(async () => {
     if (!tableUuid) {
       return;
     }
@@ -154,7 +195,19 @@ const ClientTableView = () => {
     if (freshTable) {
       setTable(freshTable);
     }
-  };
+  }, [getPublicTableByUuid, tableUuid]);
+
+  useEffect(() => {
+    if (!sessionReady || !tableUuid) {
+      return undefined;
+    }
+
+    const intervalId = setInterval(() => {
+      refreshPublicTable();
+    }, 8000);
+
+    return () => clearInterval(intervalId);
+  }, [refreshPublicTable, sessionReady, tableUuid]);
 
   const handleStartSession = async () => {
     if (!tableUuid || !signature) {
@@ -187,7 +240,7 @@ const ClientTableView = () => {
         previous
           ? {
               ...previous,
-              callRequest: { type, timestamp: new Date() },
+              callRequest: { type, status: 'pending', timestamp: new Date(), attendedAt: null, attendedBy: null },
             }
           : previous,
       );
@@ -214,7 +267,7 @@ const ClientTableView = () => {
 
       setCart([]);
       pushConfirmation('Pedido enviado a cocina');
-      await refreshPublicTable();
+      refreshPublicTable();
     } catch (orderError) {
       console.error('Error sending public order:', orderError);
       setError(orderError?.response?.data?.message || 'No se pudo enviar el pedido');
@@ -488,6 +541,30 @@ const ClientTableView = () => {
               </div>
 
               <div className="grid sm:grid-cols-2 gap-4">
+                {table.callRequest?.type && (
+                  <div className={clsx(
+                    'sm:col-span-2 p-4 rounded-3xl border',
+                    table.callRequest.status === 'acknowledged'
+                      ? 'bg-sky-500/10 border-sky-500/20'
+                      : 'bg-amber-500/10 border-amber-500/20',
+                  )}>
+                    <p className={clsx(
+                      'text-sm font-semibold',
+                      table.callRequest.status === 'acknowledged' ? 'text-sky-300' : 'text-amber-300',
+                    )}>
+                      {table.callRequest.status === 'acknowledged'
+                        ? 'Tu llamada ya esta siendo atendida'
+                        : 'Tu llamada fue enviada al salon'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {table.callRequest.type === 'bill'
+                        ? 'Solicitud de cuenta activa.'
+                        : table.callRequest.type === 'order'
+                          ? 'Solicitud para ordenar activa.'
+                          : 'Solicitud de ayuda activa.'}
+                    </p>
+                  </div>
+                )}
                 <button
                   onClick={() => handleCallWaiter('order')}
                   className="p-5 rounded-3xl bg-gradient-to-br from-amber-500 to-orange-600 text-white flex items-center gap-4"
@@ -561,45 +638,101 @@ const ClientTableView = () => {
                   <p className="font-semibold">Tu pedido</p>
                 </div>
 
-                {cart.length === 0 ? (
+                {cart.length === 0 && sessionOrders.length === 0 ? (
                   <p className="text-gray-500 text-sm">Agrega productos del menu para enviar tu pedido.</p>
                 ) : (
                   <div className="space-y-3">
-                    {cart.map((item) => (
-                      <div
-                        key={item.product.id}
-                        className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/5"
-                      >
-                        <div>
-                          <p className="font-medium">{item.product.name}</p>
-                          <p className="text-xs text-gray-500">Bs. {item.product.price.toFixed(2)} c/u</p>
+                    {cart.length > 0 && (
+                      <>
+                        {cart.map((item) => (
+                          <div
+                            key={item.product.id}
+                            className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-white/5"
+                          >
+                            <div>
+                              <p className="font-medium">{item.product.name}</p>
+                              <p className="text-xs text-gray-500">Bs. {item.product.price.toFixed(2)} c/u</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold">{item.quantity}x</p>
+                              <p className="text-xs text-emerald-400">
+                                Bs. {(item.quantity * item.product.price).toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+
+                        <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+                          <span className="text-gray-400">Total</span>
+                          <span className="text-2xl font-bold text-white">Bs. {cartTotal.toFixed(2)}</span>
                         </div>
-                        <div className="text-right">
-                          <p className="font-semibold">{item.quantity}x</p>
-                          <p className="text-xs text-emerald-400">
-                            Bs. {(item.quantity * item.product.price).toFixed(2)}
-                          </p>
+
+                        <button
+                          onClick={handleSubmitOrder}
+                          disabled={isSubmittingOrder}
+                          className={clsx(
+                            'w-full py-3 rounded-2xl font-semibold',
+                            isSubmittingOrder
+                              ? 'bg-white/10 text-gray-500 cursor-not-allowed'
+                              : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white',
+                          )}
+                        >
+                          {isSubmittingOrder ? 'Enviando pedido...' : 'Enviar pedido a cocina'}
+                        </button>
+                      </>
+                    )}
+
+                    {sessionOrders.length > 0 && (
+                      <div className={clsx('space-y-3', cart.length > 0 && 'pt-4 border-t border-white/10')}>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-semibold text-white">Pedidos enviados</p>
+                          <p className="text-xs text-gray-500">Actualiza automaticamente</p>
                         </div>
+
+                        {sessionOrders.map((order) => {
+                          const statusMeta = ORDER_STATUS_META[order.status] || ORDER_STATUS_META.pending;
+
+                          return (
+                            <div key={order.id} className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold">Pedido #{order.id}</p>
+                                  <p className="text-xs text-gray-500">
+                                    {order.customerName || 'Tu mesa'} · Bs. {order.total.toFixed(2)}
+                                  </p>
+                                </div>
+                                <span
+                                  className={clsx(
+                                    'px-3 py-1 rounded-full text-xs font-semibold',
+                                    statusMeta.badgeClassName,
+                                  )}
+                                >
+                                  {statusMeta.label}
+                                </span>
+                              </div>
+
+                              <div className="space-y-2">
+                                {order.items.map((item, index) => (
+                                  <div
+                                    key={`${order.id}-${item.product.id}-${index}`}
+                                    className="flex items-center justify-between gap-3 text-sm"
+                                  >
+                                    <span className="text-gray-200">
+                                      {item.quantity}x {item.product.name}
+                                    </span>
+                                    <span className="text-gray-500">
+                                      Bs. {(item.quantity * item.product.price).toFixed(2)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <p className="text-xs text-gray-400">{statusMeta.description}</p>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
-
-                    <div className="pt-3 border-t border-white/10 flex items-center justify-between">
-                      <span className="text-gray-400">Total</span>
-                      <span className="text-2xl font-bold text-white">Bs. {cartTotal.toFixed(2)}</span>
-                    </div>
-
-                    <button
-                      onClick={handleSubmitOrder}
-                      disabled={isSubmittingOrder}
-                      className={clsx(
-                        'w-full py-3 rounded-2xl font-semibold',
-                        isSubmittingOrder
-                          ? 'bg-white/10 text-gray-500 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white',
-                      )}
-                    >
-                      {isSubmittingOrder ? 'Enviando pedido...' : 'Enviar pedido a cocina'}
-                    </button>
+                    )}
                   </div>
                 )}
 
