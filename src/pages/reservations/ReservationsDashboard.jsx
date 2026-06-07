@@ -106,7 +106,7 @@ const ReservationsDashboard = () => {
     try {
       const [agendaResult, reviewQueueResult] = await Promise.all([
         getReservationAgenda(selectedDate),
-        canReviewGuarantees ? getReservationReviewQueue(selectedDate) : Promise.resolve({ items: [], total: 0 }),
+        canReviewGuarantees ? getReservationReviewQueue() : Promise.resolve({ items: [], total: 0 }),
       ]);
 
       setAgenda(agendaResult);
