@@ -424,7 +424,7 @@ const SplitBillModal = ({ open, onClose, tableId, tableNumber, scope = 'waiter' 
 
                           <div className="space-y-2">
                             {group.items.map((item) => (
-                              <button
+                              <div
                                 key={item.allocationId}
                                 onClick={() => {
                                   setActiveLineItem(item);
@@ -432,10 +432,10 @@ const SplitBillModal = ({ open, onClose, tableId, tableNumber, scope = 'waiter' 
                                   setSplitAmount('');
                                 }}
                                 className={clsx(
-                                  'w-full text-left p-3 rounded-2xl border transition-all',
+                                  'w-full text-left p-3 rounded-2xl border transition-all cursor-pointer',
                                   activeLineItem?.allocationId === item.allocationId
                                     ? 'bg-amber-500/10 border-amber-500/30'
-                                    : 'bg-white/[0.03] border-white/8',
+                                    : 'bg-white/[0.03] border-white/8 hover:border-white/12',
                                 )}
                               >
                                 <div className="flex items-start justify-between gap-3">
@@ -454,7 +454,10 @@ const SplitBillModal = ({ open, onClose, tableId, tableNumber, scope = 'waiter' 
                                 </div>
 
                                 {activeLineItem?.allocationId === item.allocationId && item.canEdit ? (
-                                  <div className="grid md:grid-cols-[1fr_auto_auto] gap-2 mt-3">
+                                  <div 
+                                    className="grid md:grid-cols-[1fr_auto_auto] gap-2 mt-3"
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
                                     <select
                                       value={selectedTargetAccountId}
                                       onChange={(event) => setSelectedTargetAccountId(event.target.value)}
@@ -502,7 +505,7 @@ const SplitBillModal = ({ open, onClose, tableId, tableNumber, scope = 'waiter' 
                                     </div>
                                   </div>
                                 ) : null}
-                              </button>
+                              </div>
                             ))}
                           </div>
                         </div>
