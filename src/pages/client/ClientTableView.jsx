@@ -493,7 +493,7 @@ const ClientTableView = () => {
         <div className="text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500/20 border border-amber-500/30 rounded-full mb-4">
             <Sparkles size={16} className="text-amber-400" />
-            <span className="text-amber-400 font-medium text-sm">Gusto Bolivia</span>
+            <span className="text-amber-400 font-medium text-sm">GUSTO.BO</span>
           </div>
           <h1 className="text-4xl font-bold mb-2">Mesa {table.number}</h1>
           <p className="text-gray-500">

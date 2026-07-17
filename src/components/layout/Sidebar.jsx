@@ -138,7 +138,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                 <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${getRoleGradient()} flex items-center justify-center shadow-lg`}>
                   <Sparkles size={16} className="text-white" />
                 </div>
-                {!isCollapsed ? <span className="text-lg font-bold text-white tracking-tight">GUSTO</span> : null}
+                {!isCollapsed ? <span className="text-lg font-bold text-white tracking-tight">GUSTO.BO</span> : null}
               </motion.div>
               <div className="flex items-center gap-1">
                 {!isMobile ? (

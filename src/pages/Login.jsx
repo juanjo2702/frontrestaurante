@@ -131,7 +131,7 @@ const Login = () => {
             </div>
 
             <h1 className="text-5xl lg:text-6xl font-black text-white mb-3 tracking-tight">
-              GUSTO
+              GUSTO.BO
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">.</span>
             </h1>
             <p className="text-xl text-gray-400 mb-8 leading-relaxed max-w-md">

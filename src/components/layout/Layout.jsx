@@ -68,7 +68,7 @@ const Layout = () => {
         {/* Footer - Hidden on mobile */}
         <footer className="hidden sm:block py-3 px-4 border-t border-white/5 text-center shrink-0">
           <p className="text-[10px] sm:text-xs text-gray-600">
-            © 2024 Gusto Restaurant • v2.0.0
+            © 2026 GUSTO.BO • v2.0.0
           </p>
         </footer>
       </div>

@@ -12,10 +12,10 @@ const guaranteeBadgeMap = {
 };
 
 const guaranteeLabelMap = {
-  not_required: 'Sin garantia',
-  pending_review: 'Pendiente revision',
-  approved: 'Garantia aprobada',
-  rejected: 'Garantia rechazada',
+  not_required: 'Sin garantía',
+  pending_review: 'Pendiente revisión',
+  approved: 'Garantía aprobada',
+  rejected: 'Garantía rechazada',
 };
 
 const operationalBadgeMap = {
@@ -29,7 +29,7 @@ const operationalBadgeMap = {
 
 const operationalLabelMap = {
   scheduled: 'Programada',
-  arrived: 'Llego',
+  arrived: 'Llegó',
   seated: 'Sentado',
   no_show: 'No show',
   cancelled: 'Cancelada',
@@ -175,7 +175,7 @@ const ReservationsDashboard = () => {
 
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         <SummaryCard icon={CalendarDays} label="Total" value={agenda.summary.total || 0} />
-        <SummaryCard icon={ShieldCheck} label="Pendientes de revision" value={agenda.summary.pending_review || 0} accent="text-amber-300" />
+        <SummaryCard icon={ShieldCheck} label="Pendientes de revisión" value={agenda.summary.pending_review || 0} accent="text-amber-300" />
         <SummaryCard icon={Clock3} label="Programadas" value={agenda.summary.scheduled || 0} accent="text-blue-300" />
         <SummaryCard icon={UserCheck} label="Llegaron" value={agenda.summary.arrived || 0} accent="text-cyan-300" />
         <SummaryCard icon={Users} label="Sentadas" value={agenda.summary.seated || 0} accent="text-emerald-300" />
@@ -186,12 +186,12 @@ const ReservationsDashboard = () => {
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <ShieldCheck size={18} className="text-amber-300" />
-            <h2 className="text-lg font-semibold text-white">Garantias pendientes</h2>
+            <h2 className="text-lg font-semibold text-white">Garantías pendientes</h2>
           </div>
 
           {reviewQueue.items.length === 0 ? (
             <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/10 text-sm text-gray-500">
-              No hay comprobantes pendientes de revision para esta fecha.
+              No hay comprobantes pendientes de revisión para esta fecha.
             </div>
           ) : (
             <div className="grid gap-4">
@@ -209,7 +209,7 @@ const ReservationsDashboard = () => {
                         Mesa {reservation.tableNumber} · {reservation.customerName} · {reservation.peopleCount} personas
                       </p>
                       <p className="text-sm text-gray-500">
-                        {formatDateTime(reservation.reservationTime)} · Garantia Bs. {reservation.guaranteeAmount.toFixed(2)}
+                        {formatDateTime(reservation.reservationTime)} · Garantía Bs. {reservation.guaranteeAmount.toFixed(2)}
                       </p>
                       <p className="text-sm text-gray-500">
                         Tel: {reservation.customerPhone} {reservation.guaranteeReference ? `· Ref: ${reservation.guaranteeReference}` : ''}
@@ -287,7 +287,7 @@ const ReservationsDashboard = () => {
                     </p>
                     {reservation.guaranteeReviewNotes ? (
                       <p className="text-sm text-amber-200">
-                        Nota de revision: {reservation.guaranteeReviewNotes}
+                        Nota de revisión: {reservation.guaranteeReviewNotes}
                       </p>
                     ) : null}
                   </div>

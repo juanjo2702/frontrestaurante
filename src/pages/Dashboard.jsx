@@ -18,7 +18,7 @@ const Dashboard = () => {
       case 'waiter': return 'Portal de Meseros';
       case 'kitchen': return 'Pantalla de Cocina';
       case 'cashier': return 'Terminal de Caja';
-      case 'client': return 'Bienvenido a Gusto';
+      case 'client': return 'Bienvenido a GUSTO.BO';
       default: return 'Panel Principal';
     }
   };

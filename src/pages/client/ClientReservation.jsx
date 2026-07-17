@@ -12,6 +12,7 @@ import {
   FileText,
   MessageCircle,
   Phone,
+  QrCode,
   RefreshCw,
   Table,
   Upload,
@@ -21,15 +22,25 @@ import {
 import { clsx } from 'clsx';
 import { useLocation } from 'react-router-dom';
 import { useRestaurant } from '../../context/RestaurantContext';
+import api from '../../services/api';
 
-const TIME_SLOTS = [
-  '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
-  '19:00', '19:30', '20:00', '20:30', '21:00', '21:30',
-];
+const generateTimeSlots = (openTime, closeTime) => {
+  const slots = [];
+  const [openHour] = openTime.split(':').map(Number);
+  const [closeHour] = closeTime.split(':').map(Number);
+  for (let h = openHour; h <= closeHour; h++) {
+    slots.push(`${h.toString().padStart(2, '0')}:00`);
+    if (h < closeHour) slots.push(`${h.toString().padStart(2, '0')}:30`);
+  }
+  return slots;
+};
+
+const DEFAULT_OPEN_TIME = '11:00';
+const DEFAULT_CLOSE_TIME = '22:00';
 
 const guaranteeLabelMap = {
-  not_required: 'Sin garantia',
-  pending_review: 'En revision',
+  not_required: 'Sin garantía',
+  pending_review: 'En revisión',
   approved: 'Aprobada',
   rejected: 'Rechazada',
 };
@@ -107,11 +118,68 @@ const ClientReservation = () => {
   const [submitSuccess, setSubmitSuccess] = useState(null);
   const [reuploadingToken, setReuploadingToken] = useState('');
 
+  const [timeSlots, setTimeSlots] = useState([]);
+  const [qrPaymentStep, setQrPaymentStep] = useState('select');
+  const [currentReservationId, setCurrentReservationId] = useState(null);
+  const [currentReservationCode, setCurrentReservationCode] = useState(null);
+  const [currentTrackingToken, setCurrentTrackingToken] = useState(null);
+  const [qrSvgUrl, setQrSvgUrl] = useState(null);
+  const [isQrPaid, setIsQrPaid] = useState(false);
+  const [isQrLoading, setIsQrLoading] = useState(false);
+
   const monthNames = useMemo(
     () => ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
     [],
   );
-  const dayNames = useMemo(() => ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'], []);
+  const dayNames = useMemo(() => ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'], []);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await api.get('/settings');
+        const grouped = response.data;
+        const hours = grouped.hours || [];
+        const openEntry = hours.find(h => h.key === 'openTime');
+        const closeEntry = hours.find(h => h.key === 'closeTime');
+        const open = openEntry?.value || DEFAULT_OPEN_TIME;
+        const close = closeEntry?.value || DEFAULT_CLOSE_TIME;
+        setTimeSlots(generateTimeSlots(open, close));
+      } catch (error) {
+        console.error('Error loading settings:', error);
+        setTimeSlots(generateTimeSlots(DEFAULT_OPEN_TIME, DEFAULT_CLOSE_TIME));
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const isPreviousMonthDisabled = useMemo(() => {
+    const today = new Date();
+    return (
+      currentMonth.getFullYear() < today.getFullYear() ||
+      (currentMonth.getFullYear() === today.getFullYear() && currentMonth.getMonth() <= today.getMonth())
+    );
+  }, [currentMonth]);
+
+  const filteredTimeSlots = useMemo(() => {
+    if (!selectedDate) return timeSlots;
+    const today = new Date();
+    const isToday =
+      selectedDate.getDate() === today.getDate() &&
+      selectedDate.getMonth() === today.getMonth() &&
+      selectedDate.getFullYear() === today.getFullYear();
+
+    if (!isToday) return timeSlots;
+
+    const currentHour = today.getHours();
+    const currentMinute = today.getMinutes();
+
+    return timeSlots.filter((slot) => {
+      const [slotHour, slotMinute] = slot.split(':').map(Number);
+      if (slotHour > currentHour) return true;
+      if (slotHour === currentHour && slotMinute > currentMinute) return true;
+      return false;
+    });
+  }, [selectedDate, timeSlots]);
 
   useEffect(() => {
     setActiveTab(location.pathname === '/reservations' ? 'history' : 'new');
@@ -169,6 +237,12 @@ const ClientReservation = () => {
       URL.revokeObjectURL(paymentProofPreview);
     }
     setPaymentProofPreview('');
+    setQrPaymentStep('select');
+    setCurrentReservationId(null);
+    setCurrentReservationCode(null);
+    setCurrentTrackingToken(null);
+    setQrSvgUrl(null);
+    setIsQrPaid(false);
   }, [paymentProofPreview]);
 
   const loadHistory = useCallback(async () => {
@@ -190,6 +264,25 @@ const ClientReservation = () => {
       loadHistory();
     }
   }, [activeTab, loadHistory]);
+
+  useEffect(() => {
+    if (selectedDate && selectedTime) {
+      const today = new Date();
+      const isToday =
+        selectedDate.getDate() === today.getDate() &&
+        selectedDate.getMonth() === today.getMonth() &&
+        selectedDate.getFullYear() === today.getFullYear();
+
+      if (isToday) {
+        const [slotHour, slotMinute] = selectedTime.split(':').map(Number);
+        const currentHour = today.getHours();
+        const currentMinute = today.getMinutes();
+        if (slotHour < currentHour || (slotHour === currentHour && slotMinute <= currentMinute)) {
+          setSelectedTime(null);
+        }
+      }
+    }
+  }, [selectedDate, selectedTime]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,15 +358,15 @@ const ClientReservation = () => {
   const openWhatsAppFollowUp = (reservation) => {
     const message = encodeURIComponent(
       [
-        '*Reserva creada en GUSTO*',
+        '*Reserva creada en GUSTO.BO*',
         '',
-        `Codigo: ${reservation.code}`,
+        `Código: ${reservation.code}`,
         `Fecha: ${formatHistoryDate(reservation.reservationTime)}`,
         `Mesa: Mesa ${reservation.tableNumber}`,
         `Cliente: ${reservation.customerName}`,
-        `Telefono: ${reservation.customerPhone}`,
+        `Teléfono: ${reservation.customerPhone}`,
         '',
-        'La garantia ya fue cargada en el sistema.',
+        'La garantía ya fue cargada en el sistema.',
       ].join('\n'),
     );
 
@@ -295,17 +388,39 @@ const ClientReservation = () => {
     setIsSubmitting(true);
 
     try {
-      const reservation = await createPublicReservation({
-        mesa_id: selectedTableId,
-        nombre_cliente: customerName.trim(),
-        cantidad_personas: guests,
-        hora_reserva: `${localDate} ${selectedTime}:00`,
-        telefono: customerPhone.trim(),
-        garantia_referencia: guaranteeReference.trim(),
-        comprobante_garantia: paymentProof,
-      });
+      let reservation;
 
-      setSubmitSuccess(reservation);
+      if (currentReservationId) {
+        const fd = new FormData();
+        fd.append('comprobante_garantia', paymentProof);
+        fd.append('garantia_referencia', guaranteeReference.trim());
+        await api.post(`/public/reservations/${currentReservationId}/comprobante`, fd);
+        const histRes = await api.post('/public/reservations/history', { tokens: [currentTrackingToken] });
+        reservation = histRes.data.items[0];
+      } else {
+        reservation = await createPublicReservation({
+          mesa_id: selectedTableId,
+          nombre_cliente: customerName.trim(),
+          cantidad_personas: guests,
+          hora_reserva: `${localDate} ${selectedTime}:00`,
+          telefono: customerPhone.trim(),
+          garantia_referencia: guaranteeReference.trim(),
+          comprobante_garantia: paymentProof,
+        });
+      }
+
+      const normalizedReservation = {
+        id: reservation.id,
+        code: reservation.codigo_reserva,
+        guaranteeStatus: reservation.garantia_estado,
+        tableNumber: reservation.mesa?.numero,
+        customerName: reservation.nombre_cliente,
+        customerPhone: reservation.telefono,
+        guaranteeAmount: reservation.garantia_monto,
+        trackingToken: currentTrackingToken || reservation.tracking_token,
+      };
+
+      setSubmitSuccess(normalizedReservation);
       resetReservationForm();
       await loadHistory();
       setActiveTab('history');
@@ -343,7 +458,7 @@ const ClientReservation = () => {
     <div className="max-w-4xl mx-auto py-6 px-4 space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">Reservas GUSTO</h1>
+          <h1 className="text-3xl font-bold text-white">Reservas GUSTO.BO</h1>
           <p className="text-gray-500">Reserva con garantia real y revisa el estado de tus solicitudes.</p>
         </div>
         <div className="inline-flex p-1 rounded-2xl bg-white/[0.03] border border-white/10 self-start">
@@ -372,10 +487,10 @@ const ClientReservation = () => {
         <div className="p-5 rounded-2xl bg-emerald-500/10 border border-emerald-400/20">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-1">
-              <p className="text-emerald-300 font-semibold">Reserva registrada con exito</p>
+              <p className="text-emerald-300 font-semibold">Reserva registrada con éxito</p>
               <p className="text-white text-lg">{submitSuccess.code} · Mesa {submitSuccess.tableNumber}</p>
               <p className="text-sm text-gray-300">
-                Quedo en estado <span className="text-amber-300">{guaranteeLabelMap[submitSuccess.guaranteeStatus]}</span> para el comprobante.
+                Quedó en estado <span className="text-amber-300">{guaranteeLabelMap[submitSuccess.guaranteeStatus]}</span> para el comprobante.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -446,15 +561,16 @@ const ClientReservation = () => {
                     </div>
                     <div>
                       <h2 className="text-xl font-bold text-white">Fecha y hora</h2>
-                      <p className="text-sm text-gray-500">Elige cuando te visitamos.</p>
+                      <p className="text-sm text-gray-500">Elige cuándo te visitamos.</p>
                     </div>
                   </div>
 
                   <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10">
                     <div className="flex items-center justify-between mb-4">
                       <button
+                        disabled={isPreviousMonthDisabled}
                         onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))}
-                        className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white"
+                        className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white disabled:opacity-35 disabled:hover:bg-transparent disabled:cursor-not-allowed"
                       >
                         <ChevronLeft size={20} />
                       </button>
@@ -503,7 +619,7 @@ const ClientReservation = () => {
                         Horarios disponibles
                       </p>
                       <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-                        {TIME_SLOTS.map((time) => (
+                        {filteredTimeSlots.map((time) => (
                           <button
                             key={time}
                             onClick={() => setSelectedTime(time)}
@@ -603,7 +719,7 @@ const ClientReservation = () => {
                                 </span>
                               </div>
                               <p className="text-sm text-gray-500">
-                                Ubicacion: {table.ubicacion_x}, {table.ubicacion_y}
+                                Ubicación: {table.ubicacion_x}, {table.ubicacion_y}
                               </p>
                             </div>
                             <div
@@ -652,7 +768,7 @@ const ClientReservation = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm text-gray-400 mb-2">Telefono o WhatsApp</label>
+                      <label className="block text-sm text-gray-400 mb-2">Teléfono o WhatsApp</label>
                       <input
                         type="tel"
                         value={customerPhone}
@@ -678,63 +794,180 @@ const ClientReservation = () => {
                       <CreditCard size={24} />
                     </div>
                     <div>
-                      <h2 className="text-xl font-bold text-white">Garantia y comprobante</h2>
-                      <p className="text-sm text-gray-500">La reserva entra a revision con tu comprobante.</p>
+                      <h2 className="text-xl font-bold text-white">Garantía y comprobante</h2>
+                      <p className="text-sm text-gray-500">La reserva entra a revisión con tu comprobante.</p>
                     </div>
                   </div>
 
                   <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/10 text-center">
-                    <p className="text-sm text-gray-400 mb-4">Monto sugerido de garantia</p>
+                    <p className="text-sm text-gray-400 mb-4">Monto sugerido de garantía</p>
                     <p className="text-4xl font-bold text-amber-400 mb-2">Bs. {guests * 50}</p>
                     <p className="text-sm text-gray-500">Se revisa por caja o administracion antes de confirmar.</p>
                   </div>
 
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">Referencia o numero de transferencia</label>
-                    <input
-                      type="text"
-                      value={guaranteeReference}
-                      onChange={(event) => setGuaranteeReference(event.target.value)}
-                      placeholder="Opcional"
-                      className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50"
-                    />
-                  </div>
+                  {qrPaymentStep === 'select' && !qrSvgUrl ? (
+                    <>
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-2">Metodo de pago de garantia</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            onClick={async () => {
+                              setIsQrLoading(true);
+                              try {
+                                const reservationDate = new Date(selectedDate);
+                                const localDate = [
+                                  reservationDate.getFullYear(),
+                                  String(reservationDate.getMonth() + 1).padStart(2, '0'),
+                                  String(reservationDate.getDate()).padStart(2, '0'),
+                                ].join('-');
 
-                  <div>
-                    <p className="text-sm text-gray-400 mb-3">Sube tu comprobante</p>
-                    {paymentProofPreview ? (
-                      <div className="relative rounded-2xl overflow-hidden border border-white/10">
-                        <img src={paymentProofPreview} alt="Comprobante" className="w-full h-64 object-cover" />
-                        <button
-                          onClick={() => {
-                            setPaymentProof(null);
-                            if (paymentProofPreview) {
-                              URL.revokeObjectURL(paymentProofPreview);
-                            }
-                            setPaymentProofPreview('');
-                          }}
-                          className="absolute top-3 right-3 p-2 rounded-full bg-red-500 text-white"
-                        >
-                          <X size={16} />
-                        </button>
-                        <div className="absolute bottom-3 left-3 px-3 py-1 rounded-full bg-emerald-500 text-white text-sm flex items-center gap-1">
-                          <Check size={14} />
-                          Comprobante listo
+                                const fd = new FormData();
+                                fd.append('mesa_id', selectedTableId);
+                                fd.append('nombre_cliente', customerName.trim());
+                                fd.append('cantidad_personas', guests);
+                                fd.append('hora_reserva', `${localDate} ${selectedTime}:00`);
+                                fd.append('telefono', customerPhone.trim());
+                                fd.append('garantia_referencia', guaranteeReference.trim());
+
+                                const res = await api.post('/public/reservations/with-qr', fd);
+                                const reserva = res.data;
+                                setCurrentReservationId(reserva.id);
+                                setCurrentReservationCode(reserva.codigo_reserva);
+                                setCurrentTrackingToken(reserva.tracking_token);
+
+                                const qrRes = await api.get(`/public/reservations/${reserva.id}/garantia-qr`, { responseType: 'text' });
+                                const qrBlob = new Blob([qrRes.data], { type: 'image/svg+xml' });
+                                const qrUrl = URL.createObjectURL(qrBlob);
+                                setQrSvgUrl(qrUrl);
+                                setQrPaymentStep('qr');
+                              } catch (error) {
+                                console.error('Error creating reservation for QR:', error);
+                                alert('No pudimos generar el QR. Intenta de nuevo.');
+                              } finally {
+                                setIsQrLoading(false);
+                              }
+                            }}
+                            disabled={isQrLoading}
+                            className="p-4 rounded-xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 transition-all flex flex-col items-center gap-2"
+                          >
+                            {isQrLoading ? (
+                              <RefreshCw size={32} className="text-amber-400 animate-spin" />
+                            ) : (
+                              <QrCode size={32} className="text-amber-400" />
+                            )}
+                            <span className="text-amber-400 font-medium text-sm">Pagar con QR</span>
+                          </button>
+                          <button
+                            onClick={() => setQrPaymentStep('upload')}
+                            className="p-4 rounded-xl border-2 border-dashed border-white/20 bg-white/5 hover:bg-white/10 transition-all flex flex-col items-center gap-2"
+                          >
+                            <Camera size={32} className="text-gray-400" />
+                            <span className="text-gray-400 font-medium text-sm">Subir comprobante</span>
+                          </button>
                         </div>
                       </div>
-                    ) : (
-                      <label className="block cursor-pointer">
-                        <div className="p-8 rounded-2xl border-2 border-dashed border-white/20 hover:border-amber-500/50 transition-colors text-center">
-                          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-500/20 flex items-center justify-center">
-                            <Camera size={28} className="text-amber-400" />
-                          </div>
-                          <p className="text-gray-300 mb-1">Toca para subir imagen</p>
-                          <p className="text-xs text-gray-500">Captura o foto del comprobante.</p>
+                    </>
+                  ) : null}
+
+                  {qrPaymentStep === 'qr' && qrSvgUrl ? (
+                    <>
+                      <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10">
+                        <div className="text-center mb-4">
+                          <p className="text-sm text-gray-400">Escanea el QR para pagar</p>
+                          <p className="text-lg font-bold text-amber-400">Bs. {guests * 50}</p>
+                          <p className="text-xs text-gray-500">Ref: {currentReservationCode}</p>
                         </div>
-                        <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                      </label>
-                    )}
-                  </div>
+                        <div className="flex justify-center mb-4">
+                          <img
+                            src={qrSvgUrl}
+                            alt="QR de pago"
+                            className="w-48 h-48 object-contain bg-white rounded-2xl p-2"
+                          />
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await api.post(`/public/reservations/${currentReservationId}/simular-pago-qr`);
+                              setIsQrPaid(true);
+                              setQrPaymentStep('upload');
+                            } catch (error) {
+                              console.error('Error simulating QR payment:', error);
+                              alert('No pudimos confirmar el pago QR. Intenta de nuevo.');
+                            }
+                          }}
+                          className="w-full py-3 rounded-xl bg-emerald-500 text-white font-semibold hover:bg-emerald-600 transition-colors"
+                        >
+                          Ya realize el pago
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (qrSvgUrl) URL.revokeObjectURL(qrSvgUrl);
+                            setQrSvgUrl(null);
+                            setQrPaymentStep('select');
+                            setCurrentReservationId(null);
+                            setCurrentReservationCode(null);
+                            setCurrentTrackingToken(null);
+                          }}
+                          className="w-full mt-2 py-2 text-gray-400 text-sm hover:text-white"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+
+                  {(qrPaymentStep === 'upload' || qrSvgUrl === null) && (
+                    <>
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-2">Referencia o numero de transferencia</label>
+                        <input
+                          type="text"
+                          value={guaranteeReference}
+                          onChange={(event) => setGuaranteeReference(event.target.value)}
+                          placeholder="Opcional"
+                          className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50"
+                        />
+                      </div>
+
+                      <div>
+                        <p className="text-sm text-gray-400 mb-3">
+                          {isQrPaid ? 'Comprobante (obligatorio aunque ya pagaste con QR)' : 'Sube tu comprobante'}
+                        </p>
+                        {paymentProofPreview ? (
+                          <div className="relative rounded-2xl overflow-hidden border border-white/10">
+                            <img src={paymentProofPreview} alt="Comprobante" className="w-full h-64 object-cover" />
+                            <button
+                              onClick={() => {
+                                setPaymentProof(null);
+                                if (paymentProofPreview) {
+                                  URL.revokeObjectURL(paymentProofPreview);
+                                }
+                                setPaymentProofPreview('');
+                              }}
+                              className="absolute top-3 right-3 p-2 rounded-full bg-red-500 text-white"
+                            >
+                              <X size={16} />
+                            </button>
+                            <div className="absolute bottom-3 left-3 px-3 py-1 rounded-full bg-emerald-500 text-white text-sm flex items-center gap-1">
+                              <Check size={14} />
+                              Comprobante listo
+                            </div>
+                          </div>
+                        ) : (
+                          <label className="block cursor-pointer">
+                            <div className="p-8 rounded-2xl border-2 border-dashed border-white/20 hover:border-amber-500/50 transition-colors text-center">
+                              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-500/20 flex items-center justify-center">
+                                <Camera size={28} className="text-amber-400" />
+                              </div>
+                              <p className="text-gray-300 mb-1">Toca para subir imagen</p>
+                              <p className="text-xs text-gray-500">Captura o foto del comprobante.</p>
+                            </div>
+                            <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+                          </label>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </motion.div>
               ) : null}
 
@@ -752,7 +985,7 @@ const ClientReservation = () => {
                     </div>
                     <div>
                       <h2 className="text-xl font-bold text-white">Resumen de reserva</h2>
-                      <p className="text-sm text-gray-500">La garantia se guarda en el sistema, no solo en WhatsApp.</p>
+                      <p className="text-sm text-gray-500">La garantía se guarda en el sistema, no solo en WhatsApp.</p>
                     </div>
                   </div>
 
@@ -793,7 +1026,7 @@ const ClientReservation = () => {
                       </div>
                     </div>
                     <div className="pt-3 border-t border-white/10 flex items-center justify-between">
-                      <span className="text-gray-400">Garantia cargada</span>
+                      <span className="text-gray-400">Garantía cargada</span>
                       <span className="text-emerald-400 font-bold">Bs. {guests * 50}</span>
                     </div>
                   </div>

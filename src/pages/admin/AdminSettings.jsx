@@ -17,10 +17,10 @@ const AdminSettings = () => {
   
   const [settings, setSettings] = useState({
     // General
-    restaurantName: 'GUSTO',
+    restaurantName: 'GUSTO.BO',
     slogan: 'Sabor que inspira',
     phone: '+591 4 4567890',
-    email: 'contacto@gusto.com',
+    email: 'contacto@gusto.bo',
     address: 'Av. Heroínas #1234, Cochabamba',
     
     // Horarios
